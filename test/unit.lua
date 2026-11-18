@@ -115,6 +115,14 @@ check("claude --resume", M.argv_session("claude", { "claude", "--resume", uuid }
 check("claude --resume=", M.argv_session("claude", { "claude", "--resume=" .. uuid }), uuid)
 check("codex resume", M.argv_session("codex", { "codex", "resume", uuid }), uuid)
 check("codex --last", M.argv_session("codex", { "codex", "resume", "--last" }), nil)
+local pi_id = "01a1e33b-a4d0-704d-bedf-cacda769dbf1"
+local pi_file = HOME .. "/.pi/agent/sessions/--Users-me-proj--/2026-11-16T07-00-00-000Z_" .. pi_id .. ".jsonl"
+check("pi file", (M.pi_session({ pi_file })), pi_id)
+check("pi slug", M.pi_slug("/Users/me/proj"), "--Users-me-proj--")
+check("pi --session", M.argv_session("pi", { "pi", "--session", pi_id }), pi_id)
+check("pi --session-id", M.argv_session("pi", { "pi", "--session-id", pi_id }), pi_id)
+check("pi --session wants a UUID", M.argv_session("pi", { "pi", "--session", "latest" }), nil)
+check("pi is not codex", M.argv_session("codex", { "pi", "--session", pi_id }), nil)
 check("claude via node", M.is_app("claude", "node", { "node", "/usr/local/bin/claude" }), true)
 check("codex binary", M.is_app("codex", "codex", { "/opt/homebrew/bin/codex" }), true)
 check("not claude", M.is_app("claude", "node", { "node", "server.js" }), false)
@@ -142,6 +150,9 @@ check("claude keeps permission mode",
 check("codex resume with model",
   cmd({ app = "codex", id = uuid, argv = { "codex", "-m", "gpt-5", "--full-auto" } }),
   "codex resume -m gpt-5 " .. uuid)
+check("pi keeps model, drops the rest",
+  cmd({ app = "pi", id = pi_id, argv = { "pi", "--model", "m1", "--verbose", "--thinking", "high" } }),
+  "pi --model m1 --thinking high --session " .. pi_id)
 check("codex --yolo kept on resume",
   cmd({ app = "codex", id = uuid, argv = { "codex", "--yolo" } }),
   "codex resume --yolo " .. uuid)

@@ -7,7 +7,7 @@ them back when it starts again. The programs that were running in them don't
 come back: every tab returns as an empty shell. rex-durable remembers what was
 running in each tab and puts it back after a restart:
 
-  * fx, Claude Code, and Codex chats reopen on their own conversation.
+  * fx, Claude Code, Codex, and pi chats reopen on their own conversation.
   * Any other program is typed at the prompt but not run. You press Enter.
   * Plain shells are left alone.
 
@@ -71,6 +71,10 @@ M.CHATS = {
                ["--config"] = true },
     switches = { ["--dangerously-bypass-approvals-and-sandbox"] = true,
                  ["--yolo"] = true, ["--search"] = true, ["--oss"] = true },
+  },
+  pi = {
+    values = { ["--model"] = true, ["--provider"] = true, ["--thinking"] = true },
+    switches = {},
   },
 }
 
@@ -180,6 +184,8 @@ local SNAP_DIR = STATE_DIR .. "/snapshots"
 local CHECKPOINT_DIR = STATE_DIR .. "/checkpoints"
 local HISTORY_DIR = STATE_DIR .. "/history"
 local STATE_FILE = STATE_DIR .. "/state.json"
+-- Seconds a typed pi may take to start before it counts as a different one.
+local REOPEN_START = 120
 M.STATE_DIR = STATE_DIR
 
 local function notify(message)
@@ -329,7 +335,7 @@ local function is_shell(p)
 end
 
 ---------------------------------------------------------------------------
--- Chats: which conversation a running fx, Claude Code, or Codex is on
+-- Chats: which conversation a running fx, Claude Code, Codex, or pi is on
 
 local function under(path, dir)
   return path:sub(1, #dir) == dir and path:sub(#dir + 1) or nil
@@ -382,35 +388,44 @@ function M.fx_session(files, home, reader)
 end
 
 -- Codex writes ~/.codex/sessions/YYYY/MM/DD/rollout-<time>-<id>.jsonl.
-function M.codex_session(files, home)
+local function session_in(files, dir, pattern, home)
   for _, f in ipairs(list(files)) do
-    if under(f, (home or HOME) .. "/.codex/sessions/") then
-      local id = f:match("rollout%-.*%-(" .. UUID .. ")%.jsonl$")
+    if under(f, (home or HOME) .. dir) then
+      local id = f:match(pattern)
       if id then return id, f end
     end
   end
+end
+
+function M.codex_session(files, home)
+  return session_in(files, "/.codex/sessions/", "rollout%-.*%-(" .. UUID .. ")%.jsonl$", home)
 end
 
 -- Claude Code writes ~/.claude/projects/<folder with non-alphanumerics as ->/<id>.jsonl.
 function M.claude_slug(cwd) return (tostring(cwd or ""):gsub("[^%w]", "-")) end
 
+-- pi writes ~/.pi/agent/sessions/--<folder with / as ->--/<time>_<id>.jsonl.
+function M.pi_slug(cwd) return "--" .. (tostring(cwd or ""):gsub("^/", ""):gsub("/", "-")) .. "--" end
+
 function M.claude_session(files, home)
-  for _, f in ipairs(list(files)) do
-    if under(f, (home or HOME) .. "/.claude/projects/") then
-      local id = f:match("/(" .. UUID .. ")%.jsonl$")
-      if id then return id, f end
-    end
-  end
+  return session_in(files, "/.claude/projects/", "/(" .. UUID .. ")%.jsonl$", home)
+end
+
+-- Claude and pi keep no lock on their session file, so the open-file check
+-- cannot see them; that is why open_chats skips them.
+function M.pi_session(files, home)
+  return session_in(files, "/.pi/agent/sessions/", "_(" .. UUID .. ")%.jsonl$", home)
 end
 
 -- A session ID given on the command line: `codex resume <id>`,
--- `claude --resume <id>` or `claude --session-id <id>`.
+-- `claude --resume <id>`, `claude --session-id <id>` or `pi --session <id>`.
 function M.argv_session(app, argv)
   argv = list(argv)
   for i = 1, #argv - 1 do
     local a, b = argv[i], argv[i + 1]
     local wanted = (app == "codex" and a == "resume")
       or (app == "claude" and (a == "--resume" or a == "-r" or a == "--session-id"))
+      or (app == "pi" and (a == "--session" or a == "--session-id"))
     if wanted and b:match("^" .. UUID .. "$") then return b end
   end
   for _, a in ipairs(argv) do
@@ -443,10 +458,12 @@ local function chat_in(p, info)
   local name = p.name or argv[1]
   local id, store = M.fx_session(files)
   if id then return { kind = "chat", app = "fx", id = id, store = store, argv = argv } end
-  for _, app in ipairs({ "claude", "codex" }) do
+  for _, app in ipairs({ "claude", "codex", "pi" }) do
     if M.is_app(app, name, argv) then
       local found, file
-      if app == "claude" then found, file = M.claude_session(files) else found, file = M.codex_session(files) end
+      if app == "claude" then found, file = M.claude_session(files)
+      elseif app == "pi" then found, file = M.pi_session(files)
+      else found, file = M.codex_session(files) end
       return { kind = "chat", app = app, id = found or M.argv_session(app, argv),
                session_file = file, argv = argv, pid = p.pid }
     end
@@ -493,6 +510,8 @@ local function newest_session_file(pane, info)
   local candidates = {}
   if pane.app == "claude" then
     candidates = list_dir(HOME .. "/.claude/projects/" .. M.claude_slug(pane.cwd), ".jsonl")
+  elseif pane.app == "pi" then
+    candidates = list_dir(HOME .. "/.pi/agent/sessions/" .. M.pi_slug(pane.cwd), ".jsonl")
   else
     local minutes = tostring(math.floor(age / 60) + 2)
     for _, path in ipairs(lines(stdout_of({ "find", HOME .. "/.codex/sessions", "-name",
@@ -506,6 +525,7 @@ local function newest_session_file(pane, info)
   end
   if not best then return nil end
   if pane.app == "claude" then return best:match("/(" .. UUID .. ")%.jsonl$"), best end
+  if pane.app == "pi" then return best:match("_(" .. UUID .. ")%.jsonl$"), best end
   return best:match("%-(" .. UUID .. ")%.jsonl$"), best
 end
 
@@ -516,9 +536,24 @@ local function resolve_chats(pending, info)
     groups[key] = groups[key] or {}
     table.insert(groups[key], pane)
   end
+  -- An idle pi writes nothing and hides --session, so the command the last
+  -- restore typed into its tab is the only record. Bind it to the first pi
+  -- that starts in that tab after the typing, and remember that pi's pid.
+  local state = read_json(STATE_FILE) or {}
+  local typed_in, bound = state.reopened or {}, false
   for _, group in pairs(groups) do
     for _, pane in ipairs(group) do
-      if #group == 1 then pane.id, pane.session_file = newest_session_file(pane, info) end
+      if not pane.id and #group == 1 then pane.id, pane.session_file = newest_session_file(pane, info) end
+      local typed = typed_in[pane.block_id]
+      if not pane.id and typed and typed.app == pane.app then
+        local started = info.now - ((info.ps[pane.pid] or {}).age or 0)
+        -- Started within REOPEN_START after the typing (5 s of slack for clock skew).
+        local fresh = started >= typed.at - 5 and started <= typed.at + REOPEN_START
+        if typed.pid == pane.pid or (not typed.pid and fresh) then
+          pane.id = typed.id
+          if not typed.pid then typed.pid, bound = pane.pid, true end
+        end
+      end
       if not pane.id then
         -- Not sure which conversation it is: bring it back typed, not run.
         pane.kind, pane.app, pane.session_file = "program", nil, nil
@@ -526,6 +561,7 @@ local function resolve_chats(pending, info)
       end
     end
   end
+  if bound then write_json(STATE_FILE, state) end
 end
 
 ---------------------------------------------------------------------------
@@ -697,7 +733,7 @@ function M.summary(snap)
     end
   end
   local parts = {}
-  for _, app in ipairs({ "fx", "claude", "codex" }) do
+  for _, app in ipairs({ "fx", "claude", "codex", "pi" }) do
     if apps[app] then parts[#parts + 1] = apps[app] .. " " .. app end
   end
   local text = string.format("%d sessions, %d tabs, %d chats", sessions, tabs, chats)
@@ -843,6 +879,8 @@ function M.resume_argv(pane, accepts)
     argv[#argv + 1] = "--resume"
   elseif pane.app == "claude" then
     argv[#argv + 1] = "--resume"
+  elseif pane.app == "pi" then
+    argv[#argv + 1] = "--session"
   end
   argv[#argv + 1] = pane.id
   return argv
@@ -873,7 +911,7 @@ local function open_chats(saved, live)
             path = HOME .. "/.fx/sessions/" ..
               (p.store == "v2" and ("v2/" .. p.id .. "/lock") or (p.id .. "/session.lock"))
           end
-          if path and p.app ~= "claude" then
+          if path and p.app ~= "claude" and p.app ~= "pi" then
             paths[#paths + 1] = path
             owner[path] = p.app .. ":" .. p.id
           end
@@ -1000,10 +1038,18 @@ local function reopen(saved, live, dry_run, tries)
     end
     if not dry_run then
       perform(writes)
+      local state = read_json(STATE_FILE) or {}
+      if try == 1 then state.reopened = {} end
       for _, w in ipairs(writes) do
         written[w.block_id] = true
-        if w.key then typed[w.key] = true end
+        if w.key then
+          typed[w.key] = true
+          local app, id = w.key:match("^([^:]+):(.+)$")
+          state.reopened = state.reopened or {}
+          state.reopened[w.block_id] = { app = app, id = id, at = os.time() }
+        end
       end
+      write_json(STATE_FILE, state)
       chats = chats + count_kind(writes, "chat")
       programs = programs + count_kind(writes, "program")
     end
@@ -1279,6 +1325,7 @@ local function startup()
       notify(text .. ".")
     end
   end
+  state = read_state()
   state.last_restore = { at = now_iso(), from = saved.saved_at, instance = status.instance_id }
   write_json(STATE_FILE, state)
   return save()

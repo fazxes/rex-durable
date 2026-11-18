@@ -9,6 +9,7 @@ Rex saves your sessions, tabs, and splits when its server stops, and restores th
 | [fx](https://fx.sh) chat | Reopens on its conversation: `fx --resume <id>` |
 | Claude Code chat | Reopens on its conversation: `claude --resume <id>` |
 | Codex chat | Reopens on its conversation: `codex resume <id>` |
+| pi chat | Reopens on its session: `pi --session <id>` |
 | Any other program | Typed at the prompt, not run. Press Enter if you want it. |
 | Plain shell | Left alone |
 
@@ -79,6 +80,7 @@ Or run **Repair Missing Tabs** from the command palette. Repair adds each missin
   - **fx** holds a lock file for its session (`~/.fx/sessions/v2/<id>/lock`). A chat that runs subagents holds their locks too. rex-durable always saves the main chat, because fx can't reopen a subagent on its own.
   - **Codex** keeps its rollout file open (`~/.codex/sessions/…/rollout-…-<id>.jsonl`), or the ID is on its command line (`codex resume <id>`).
   - **Claude Code** names the session on its command line (`--resume <id>`). Otherwise rex-durable uses the newest session file for that folder written since the chat started. If two such chats share a folder, it can't tell them apart, so they come back typed, not run.
+  - **pi** names the session on its command line (`--session <id>`), or writes it to `~/.pi/agent/sessions/`. An idle pi writes nothing, so rex-durable remembers the command it typed on restore and binds it to the pi that starts in that tab.
 
   Saves go to `~/Library/Application Support/rex-durable/` on macOS, or `~/.local/state/rex-durable/` on Linux. It keeps the last save of each of the latest 10 servers, a copy every 10 minutes for the last 24 hours in `history/`, and the 10 newest automatic checkpoints.
 - **Restoring.** When the watcher connects to a server instance it hasn't seen, it takes the last save from the previous server. Rex restores its own sessions with the same block IDs, so each program goes back into exactly the tab it came from, by block ID first and then by session name and position. If the server starts empty, for example after `rex server stop --discard`, rex-durable creates the saved sessions itself.

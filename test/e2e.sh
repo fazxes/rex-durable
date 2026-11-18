@@ -95,7 +95,7 @@ has_line() { printf '%s\n' "$listing" | grep -E -q -- "$1"; }
 # The block ID of a tab in a listing: block LISTING SESSION WINDOW.PANE
 block() { printf '%s\n' "$1" | awk -v s="$2" -v tab="$3" '$1 == s && $2 == tab { print $NF }'; }
 
-for app in fx claude codex; do
+for app in fx claude codex pi; do
   cc -O0 -o "$T/bin/$app" -DAPP="\"$app\"" -DFAKE_HOME="\"$H\"" "$here/test/fake.c"
 done
 CODEX_ID=11111111-2222-4333-8444-555555555555
@@ -246,6 +246,38 @@ D mode=repair >"$T/repair2.log"
 sleep 2
 expect "a second repair adds nothing" grep -q 'Added 0 tabs and 0 sessions' "$T/repair2.log"
 expect "still one copy of each chat" test "$(running "$T/bin/fx --resume FXA")" = 1
+
+echo "8. An idle pi chat, which names its session nowhere, survives two restarts"
+# The fake pi writes nothing and blanks its arguments, like pi brought back on
+# --session and left alone. Only what the last restore typed says which it is.
+PI_ID=22222222-3333-4444-8555-666666666666
+pi_dir="$H/.pi/agent/sessions/--$(printf '%s' "${T#/}/my proj" | tr '/' '-')--"
+mkdir -p "$pi_dir"
+: >"$pi_dir/2026-11-17T00-00-00-000Z_$PI_ID.jsonl"
+pi_window=$(R window new -s work -c "$T/my proj" --focus=false --json | jq -r .window_id)
+sleep 1
+pi_tab=$(R window ls -s work --json | jq -r --arg w "$pi_window" '.windows[] | select(.window_id == $w) | .focused_block_id')
+# First run: pi is started on its session, so its file is the newest there.
+R do -s work -e "rex.block.call('com.superlogical.terminal', 'write', \
+  { block_id = '$pi_tab', data = [['$T/bin/pi' --session $PI_ID]] .. '\n' }) return 'ok'" >/dev/null
+sleep 1
+touch "$pi_dir/2026-11-17T00-00-00-000Z_$PI_ID.jsonl"
+sleep 1
+D mode=save
+listing=$(show)
+pi_pos=$(printf '%s\n' "$listing" | awk -v b="$pi_tab" '$NF == b { print $2 }')
+expect "pi chat found by its new session file" has_line "^work $pi_pos chat pi $PI_ID "
+for round in 1 2; do
+  stop_server
+  start_server
+  D mode=startup >"$T/startup-pi-$round.log"
+  sleep 3
+  D mode=save
+  listing=$(show)
+  expect "restart $round: pi reopened on its session" grep -q "pi --session $PI_ID (run)" "$T/startup-pi-$round.log"
+  expect "restart $round: the save still knows its session" has_line "^work $pi_pos chat pi $PI_ID "
+done
+expect "one copy of the pi chat" test "$(pgrep -f "$T/bin/pi" | wc -l | tr -d ' ')" = 1
 
 echo
 echo "$passed passed, $failed failed"

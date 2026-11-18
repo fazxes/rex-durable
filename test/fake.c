@@ -5,6 +5,7 @@
  *   fx      holds FAKE_HOME/.fx/sessions/v2/<id>/lock open
  *   codex   holds FAKE_HOME/.codex/sessions/.../rollout-<time>-<id>.jsonl open
  *   claude  writes FAKE_HOME/.claude/projects/<folder>/<id>.jsonl and closes it
+ *   pi      writes nothing and blanks its arguments, as pi on --session does
  *
  * Built by test/e2e.sh with -DAPP="fx" (or claude, codex) and -DFAKE_HOME.
  */
@@ -40,6 +41,14 @@ static void write_new(const char *path, const char *line) {
 int main(int argc, char **argv) {
   const char *app = APP;
   char id[128] = "", child[128] = "";
+  if (!strcmp(app, "pi")) {
+    /* Like pi: a chat brought back on --session writes nothing until used,
+       and its process title hides the session. */
+    for (int i = 1; i < argc; i++) memset(argv[i], ' ', strlen(argv[i]));
+    printf("fake pi\n");
+    fflush(stdout);
+    for (;;) pause();
+  }
   for (int i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "--child") && i + 1 < argc) {
       snprintf(child, sizeof child, "%s", argv[++i]);
