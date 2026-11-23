@@ -5,12 +5,13 @@
  *   fx      holds FAKE_HOME/.fx/sessions/v2/<id>/lock open
  *   codex   holds FAKE_HOME/.codex/sessions/.../rollout-<time>-<id>.jsonl open
  *   claude  writes FAKE_HOME/.claude/projects/<folder>/<id>.jsonl and closes it
+ *   pi      writes nothing and blanks its arguments, as pi on --session does
  *
  * With --write-pid-file, claude also writes FAKE_HOME/.claude/sessions/<pid>.json
  * like Claude Code 2.1, with procStart in UTC. --switch-to <id> puts another
  * session in that file, like /clear or /resume inside the chat.
  *
- * Built by test/e2e.sh with -DAPP="fx" (or claude, codex) and -DFAKE_HOME.
+ * Built by test/e2e.sh with -DAPP="fx" (or claude, codex, pi) and -DFAKE_HOME.
  */
 #include <ctype.h>
 #include <fcntl.h>
@@ -47,6 +48,14 @@ int main(int argc, char **argv) {
   char id[128] = "", child[128] = "", switch_to[128] = "";
   int write_pid_file = 0;
   time_t started = time(NULL);
+  if (!strcmp(app, "pi")) {
+    /* Like pi: a chat brought back on --session writes nothing until used,
+       and its process title hides the session. */
+    for (int i = 1; i < argc; i++) memset(argv[i], ' ', strlen(argv[i]));
+    printf("fake pi\n");
+    fflush(stdout);
+    for (;;) pause();
+  }
   for (int i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "--write-pid-file")) {
       write_pid_file = 1;

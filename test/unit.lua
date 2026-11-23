@@ -106,15 +106,22 @@ check("fx v2 lock", { M.fx_session({ "/x", HOME .. "/.fx/sessions/v2/Xy7_q-Z/loc
 check("fx v1 lock", { M.fx_session({ HOME .. "/.fx/sessions/AbC123/session.lock" }) }, { "AbC123", "v1" })
 check("fx other profile", M.fx_session({ "/tmp/aig-fx-home/.fx/sessions/v2/X/lock" }), nil)
 local rollout = HOME .. "/.codex/sessions/2026/11/13/rollout-2026-11-13T10-00-00-aaaaaaaa-1111-4222-8333-bbbbbbbbbbbb.jsonl"
-check("codex rollout", (M.codex_session({ rollout })), "aaaaaaaa-1111-4222-8333-bbbbbbbbbbbb")
+check("codex rollout", (M.session_file("codex", { rollout })), "aaaaaaaa-1111-4222-8333-bbbbbbbbbbbb")
 check("claude slug", M.claude_slug("/Users/me/my.proj"), "-Users-me-my-proj")
 local claude_file = HOME .. "/.claude/projects/-Users-me/cccccccc-4444-4555-8666-dddddddddddd.jsonl"
-check("claude file", (M.claude_session({ claude_file })), "cccccccc-4444-4555-8666-dddddddddddd")
+check("claude file", (M.session_file("claude", { claude_file })), "cccccccc-4444-4555-8666-dddddddddddd")
 local uuid = "cccccccc-4444-4555-8666-dddddddddddd"
 check("claude --resume", M.argv_session("claude", { "claude", "--resume", uuid }), uuid)
 check("claude --resume=", M.argv_session("claude", { "claude", "--resume=" .. uuid }), uuid)
 check("codex resume", M.argv_session("codex", { "codex", "resume", uuid }), uuid)
 check("codex --last", M.argv_session("codex", { "codex", "resume", "--last" }), nil)
+local pi_id = "01a1e33b-a4d0-704d-bedf-cacda769dbf1"
+local pi_file = HOME .. "/.pi/agent/sessions/--Users-me-proj--/2026-11-16T07-00-00-000Z_" .. pi_id .. ".jsonl"
+check("pi file", (M.session_file("pi", { pi_file })), pi_id)
+check("pi slug, : as - like pi", M.pi_slug("/Users/me/a:b"), "--Users-me-a-b--")
+check("pi --session", M.argv_session("pi", { "pi", "--session", pi_id }), pi_id)
+check("pi --session-id", M.argv_session("pi", { "pi", "--session-id", pi_id }), pi_id)
+check("pi --session wants a UUID", M.argv_session("pi", { "pi", "--session", "latest" }), nil)
 
 -- ~/.claude/sessions/<pid>.json
 check("procStart is UTC", M.parse_utc("Sun Nov 22 21:40:38 2026"), 1795383638)
@@ -169,6 +176,9 @@ check("claude keeps permission mode",
 check("codex resume with model",
   cmd({ app = "codex", id = uuid, argv = { "codex", "-m", "gpt-5", "--full-auto" } }),
   "codex resume -m gpt-5 " .. uuid)
+check("pi keeps model, drops the rest",
+  cmd({ app = "pi", id = pi_id, argv = { "pi", "--model", "m1", "--verbose", "--thinking", "high" } }),
+  "pi --model m1 --thinking high --session " .. pi_id)
 check("codex --yolo kept on resume",
   cmd({ app = "codex", id = uuid, argv = { "codex", "--yolo" } }),
   "codex resume --yolo " .. uuid)
@@ -268,6 +278,21 @@ live.sessions[1].windows[1].layout.split.after.pane = { block_id = "b2", kind = 
 writes, notes = plan({})
 check("a program still running in its tab is left alone quietly",
   { writes[1], notes }, { "b4=fx --resume C\n", { "work tab 2: the tab is busy, left alone" } })
+-- pi keeps no lock: next to a pi of unknown session, a pi chat is only typed.
+local pi_saved = { sessions = { { session_id = "s1", label = "work", windows = {
+  { layout = leaf({ block_id = "p1", kind = "chat", app = "pi", id = pi_id, argv = { "pi" }, cwd = "/w" }) },
+  { layout = leaf({ block_id = "p2", kind = "chat", app = "fx", id = "F", store = "v2", argv = { "fx" }, cwd = "/w" }) },
+} } } }
+local pi_live = { sessions = { { session_id = "s1", label = "work", windows = {
+  { layout = leaf({ block_id = "p1", kind = "shell", cwd = "/w" }) },
+  { layout = leaf({ block_id = "p2", kind = "shell", cwd = "/w" }) },
+} } } }
+local pi_writes = {}
+for _, w in ipairs((M.plan_reopen(pi_saved, pi_live, { unknown_pi = true }, opts))) do
+  pi_writes[#pi_writes + 1] = w.block_id .. "=" .. w.data
+end
+check("pi typed, not run, next to a pi of unknown session", pi_writes,
+  { "p1=pi --session " .. pi_id, "p2=fx --resume F\n" })
 rex.exec = real_exec
 
 print(string.format("%d passed, %d failed", passed, failed))
