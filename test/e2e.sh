@@ -6,7 +6,7 @@
 #   REX=/path/to/rex test/e2e.sh
 #
 # It runs its own Rex server on its own socket and state folder, with fake
-# fx, Claude Code, Codex, and pi chats that keep their files in a throwaway home
+# fx, Claude Code, Codex, pi, and agy chats that keep their files in a throwaway home
 # folder. It never connects to your own Rex server or touches your real chats,
 # and it stops only the server it started, by its process ID.
 set -euo pipefail
@@ -95,7 +95,7 @@ has_line() { printf '%s\n' "$listing" | grep -E -q -- "$1"; }
 # The block ID of a tab in a listing: block LISTING SESSION WINDOW.PANE
 block() { printf '%s\n' "$1" | awk -v s="$2" -v tab="$3" '$1 == s && $2 == tab { print $NF }'; }
 
-for app in fx claude codex pi; do
+for app in fx claude codex pi agy; do
   cc -O0 -o "$T/bin/$app" -DAPP="\"$app\"" -DFAKE_HOME="\"$H\"" "$here/test/fake.c"
 done
 CODEX_ID=11111111-2222-4333-8444-555555555555
@@ -362,6 +362,30 @@ expect "restart: first chat reopened on its conversation" grep -q "claude --resu
 expect "restart: second chat reopened on its conversation" grep -q "claude --resume $B_ID (run)" "$T/startup-pair.log"
 expect "restart: switched chat reopened on the new session" grep -q "claude --resume $NEW_ID (run)" "$T/startup-pair.log"
 expect "one copy of each of them" test "$(running "$T/bin/claude --resume $A_ID")$(running "$T/bin/claude --resume $B_ID")$(running "$T/bin/claude --resume $NEW_ID")" = 111
+
+echo "13. An agy chat comes back on the conversation it holds open"
+# The fake agy blanks its arguments, like agy, so only its presence lock says
+# which conversation it is on.
+AGY_ID=33333333-4444-4555-8666-777777777777
+agy_window=$(R window new -s work -c "$T/my proj" --focus=false --json | jq -r .window_id)
+sleep 1
+agy_tab=$(R window ls -s work --json | jq -r --arg w "$agy_window" '.windows[] | select(.window_id == $w) | .focused_block_id')
+R do -s work -e "rex.block.call('com.superlogical.terminal', 'write', \
+  { block_id = '$agy_tab', data = [['$T/bin/agy' --conversation $AGY_ID]] .. '\n' }) return 'ok'" >/dev/null
+sleep 2
+D mode=save
+listing=$(show)
+agy_pos=$(printf '%s\n' "$listing" | awk -v b="$agy_tab" '$NF == b { print $2 }')
+expect "agy chat found by its presence lock" has_line "^work $agy_pos chat agy $AGY_ID "
+stop_server
+start_server
+D mode=startup >"$T/startup-agy.log"
+sleep 3
+D mode=save
+listing=$(show)
+expect "restart: agy reopened on its conversation" grep -q "agy --conversation $AGY_ID (run)" "$T/startup-agy.log"
+expect "restart: the save still knows its conversation" has_line "^work $agy_pos chat agy $AGY_ID "
+expect "one copy of the agy chat" test "$(pgrep -f "$T/bin/agy" | wc -l | tr -d ' ')" = 1
 
 echo
 echo "$passed passed, $failed failed"

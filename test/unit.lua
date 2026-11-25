@@ -122,6 +122,11 @@ check("pi slug, : as - like pi", M.pi_slug("/Users/me/a:b"), "--Users-me-a-b--")
 check("pi --session", M.argv_session("pi", { "pi", "--session", pi_id }), pi_id)
 check("pi --session-id", M.argv_session("pi", { "pi", "--session-id", pi_id }), pi_id)
 check("pi --session wants a UUID", M.argv_session("pi", { "pi", "--session", "latest" }), nil)
+local agy_id = "49017625-cdb6-487b-9956-b1f7a4a9cd58"
+local agy_lock = HOME .. "/.gemini/antigravity-cli/presence/" .. agy_id .. ".lock"
+check("agy presence lock", (M.session_file("agy", { agy_lock })), agy_id)
+check("agy conversation db is not the lock",
+  M.session_file("agy", { HOME .. "/.gemini/antigravity-cli/conversations/" .. agy_id .. ".db" }), nil)
 
 -- ~/.claude/sessions/<pid>.json
 check("procStart is UTC", M.parse_utc("Sun Nov 22 21:40:38 2026"), 1795383638)
@@ -179,6 +184,8 @@ check("codex resume with model",
 check("pi keeps model, drops the rest",
   cmd({ app = "pi", id = pi_id, argv = { "pi", "--model", "m1", "--verbose", "--thinking", "high" } }),
   "pi --model m1 --thinking high --session " .. pi_id)
+check("agy reopens on its conversation", cmd({ app = "agy", id = agy_id, argv = { "agy" } }),
+  "agy --conversation " .. agy_id)
 check("codex --yolo kept on resume",
   cmd({ app = "codex", id = uuid, argv = { "codex", "--yolo" } }),
   "codex resume --yolo " .. uuid)

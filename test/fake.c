@@ -1,17 +1,19 @@
 /*
- * A stand-in for fx, Claude Code, or Codex in the end-to-end test. It keeps
+ * A stand-in for fx, Claude Code, Codex, pi, or agy in the end-to-end test. It keeps
  * its conversation's file the way the real program does, then waits:
  *
  *   fx      holds FAKE_HOME/.fx/sessions/v2/<id>/lock open
  *   codex   holds FAKE_HOME/.codex/sessions/.../rollout-<time>-<id>.jsonl open
  *   claude  writes FAKE_HOME/.claude/projects/<folder>/<id>.jsonl and closes it
  *   pi      writes nothing and blanks its arguments, as pi on --session does
+ *   agy     holds FAKE_HOME/.gemini/antigravity-cli/presence/<id>.lock open and
+ *           blanks its arguments, as agy does
  *
  * With --write-pid-file, claude also writes FAKE_HOME/.claude/sessions/<pid>.json
  * like Claude Code 2.1, with procStart in UTC. --switch-to <id> puts another
  * session in that file, like /clear or /resume inside the chat.
  *
- * Built by test/e2e.sh with -DAPP="fx" (or claude, codex, pi) and -DFAKE_HOME.
+ * Built by test/e2e.sh with -DAPP="fx" (or claude, codex, pi, agy) and -DFAKE_HOME.
  */
 #include <ctype.h>
 #include <fcntl.h>
@@ -73,7 +75,8 @@ int main(int argc, char **argv) {
       printf("usage: %s [-r, --resume [last|<id>]]\n", app);
       return 0;
     }
-    if ((!strcmp(argv[i], "--resume") || !strcmp(argv[i], "-r") || !strcmp(argv[i], "resume")) &&
+    if ((!strcmp(argv[i], "--resume") || !strcmp(argv[i], "-r") || !strcmp(argv[i], "resume") ||
+         !strcmp(argv[i], "--conversation")) &&
         i + 1 < argc)
       snprintf(id, sizeof id, "%s", argv[++i]);
   }
@@ -106,6 +109,9 @@ int main(int argc, char **argv) {
   } else if (!strcmp(app, "codex")) {
     snprintf(dir, sizeof dir, "%s/.codex/sessions/2026/11/13", FAKE_HOME);
     snprintf(file, sizeof file, "%s/rollout-2026-11-13T10-00-00-%s.jsonl", dir, id);
+  } else if (!strcmp(app, "agy")) {
+    snprintf(dir, sizeof dir, "%s/.gemini/antigravity-cli/presence", FAKE_HOME);
+    snprintf(file, sizeof file, "%s/%s.lock", dir, id);
   } else {
     char slug[2048];
     snprintf(slug, sizeof slug, "%s", cwd);
@@ -140,6 +146,9 @@ int main(int argc, char **argv) {
     if (sfd < 0 || write(sfd, body, (size_t)m) != m) return 1;
     close(sfd);
   }
+  /* Like agy: its process title shows no arguments. */
+  if (!strcmp(app, "agy"))
+    for (int i = 1; i < argc; i++) memset(argv[i], ' ', strlen(argv[i]));
   printf("fake %s on %s\n", app, id);
   fflush(stdout);
   for (;;) pause();

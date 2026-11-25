@@ -7,7 +7,7 @@ them back when it starts again. The programs that were running in them don't
 come back: every tab returns as an empty shell. rex-durable remembers what was
 running in each tab and puts it back after a restart:
 
-  * fx, Claude Code, Codex, and pi chats reopen on their own conversation.
+  * fx, Claude Code, Codex, pi, and agy chats reopen on their own conversation.
   * Any other program is typed at the prompt but not run. You press Enter.
   * Plain shells are left alone.
 
@@ -76,6 +76,7 @@ M.CHATS = {
     values = { ["--model"] = true, ["--provider"] = true, ["--thinking"] = true },
     switches = {},
   },
+  agy = { values = {}, switches = {} }, -- agy hides its arguments: none to keep
 }
 
 local UUID = "%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x"
@@ -335,7 +336,7 @@ local function is_shell(p)
 end
 
 ---------------------------------------------------------------------------
--- Chats: which conversation a running fx, Claude Code, Codex, or pi is on
+-- Chats: which conversation a running fx, Claude Code, Codex, pi, or agy is on
 
 local function under(path, dir)
   return path:sub(1, #dir) == dir and path:sub(#dir + 1) or nil
@@ -392,6 +393,8 @@ local SESSION_FILES = {
   codex = { dir = "/.codex/sessions/", id = "rollout%-.*%-(" .. UUID .. ")%.jsonl$" },
   claude = { dir = "/.claude/projects/", id = "/(" .. UUID .. ")%.jsonl$" },
   pi = { dir = "/.pi/agent/sessions/", id = "_(" .. UUID .. ")%.jsonl$" },
+  -- agy holds presence/<id>.lock open for the conversation it is on, also when idle.
+  agy = { dir = "/.gemini/antigravity-cli/presence/", id = "/(" .. UUID .. ")%.lock$" },
 }
 
 function M.session_file(app, files, home)
@@ -499,7 +502,7 @@ local function chat_in(p, info)
   local name = p.name or argv[1]
   local id, store = M.fx_session(files)
   if id then return { kind = "chat", app = "fx", id = id, store = store, argv = argv } end
-  for _, app in ipairs({ "claude", "codex", "pi" }) do
+  for _, app in ipairs({ "claude", "codex", "pi", "agy" }) do
     if M.is_app(app, name, argv) then
       local found, file
       if app == "claude" then
@@ -554,7 +557,7 @@ local function newest_session_file(pane, info)
   if pane.app == "claude" or pane.app == "pi" then
     local slug = pane.app == "claude" and M.claude_slug(pane.cwd) or M.pi_slug(pane.cwd)
     candidates = list_dir(HOME .. SESSION_FILES[pane.app].dir .. slug, ".jsonl")
-  else
+  elseif pane.app == "codex" then
     local minutes = tostring(math.floor(age / 60) + 2)
     for _, path in ipairs(lines(stdout_of({ "find", HOME .. "/.codex/sessions", "-name",
                                             "rollout-*.jsonl", "-mmin", "-" .. minutes }))) do
@@ -774,7 +777,7 @@ function M.summary(snap)
     end
   end
   local parts = {}
-  for _, app in ipairs({ "fx", "claude", "codex", "pi" }) do
+  for _, app in ipairs({ "fx", "claude", "codex", "pi", "agy" }) do
     if apps[app] then parts[#parts + 1] = apps[app] .. " " .. app end
   end
   local text = string.format("%d sessions, %d tabs, %d chats", sessions, tabs, chats)
@@ -922,6 +925,8 @@ function M.resume_argv(pane, accepts)
     argv[#argv + 1] = "--resume"
   elseif pane.app == "pi" then
     argv[#argv + 1] = "--session"
+  elseif pane.app == "agy" then
+    argv[#argv + 1] = "--conversation"
   end
   argv[#argv + 1] = pane.id
   return argv
