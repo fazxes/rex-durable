@@ -76,6 +76,11 @@ M.CHATS = {
     values = { ["--model"] = true, ["--provider"] = true, ["--thinking"] = true },
     switches = {},
   },
+  omp = {
+    values = { ["--model"] = true, ["--provider"] = true, ["--thinking"] = true,
+               ["--smol"] = true, ["--slow"] = true, ["--plan"] = true },
+    switches = {},
+  },
 }
 
 local UUID = "%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x"
@@ -392,6 +397,7 @@ local SESSION_FILES = {
   codex = { dir = "/.codex/sessions/", id = "rollout%-.*%-(" .. UUID .. ")%.jsonl$" },
   claude = { dir = "/.claude/projects/", id = "/(" .. UUID .. ")%.jsonl$" },
   pi = { dir = "/.pi/agent/sessions/", id = "_(" .. UUID .. ")%.jsonl$" },
+  omp = { dir = "/.omp/agent/sessions/", id = "_(" .. UUID .. ")%.jsonl$" },
 }
 
 function M.session_file(app, files, home)
@@ -409,6 +415,23 @@ function M.claude_slug(cwd) return (tostring(cwd or ""):gsub("[^%w]", "-")) end
 
 -- pi names its folder --<folder>-- with /, \ and : as - (getDefaultSessionDirPath).
 function M.pi_slug(cwd) return "--" .. (tostring(cwd or ""):gsub("^/", ""):gsub("[/\\:]", "-")) .. "--" end
+
+-- oh-my-pi (omp) names its folder after the path under the home folder
+-- (-<rel>) or the temp folder (-tmp-<rel>), else like pi's old --<abs>--
+-- (getDefaultSessionDirName). Very long paths get a hashed name that this
+-- can't predict: such a chat comes back typed, not run.
+function M.omp_slug(cwd, home, tmp)
+  cwd = tostring(cwd or ""):gsub("/+$", "")
+  home = (home or HOME):gsub("/+$", "")
+  tmp = (tmp or "/tmp"):gsub("/+$", "")
+  local function encode(prefix, rel)
+    local joined = prefix:sub(-1) == "-" and prefix or prefix .. "-"
+    return rel == "" and prefix or joined .. rel:gsub("[/\\:]", "-")
+  end
+  if cwd == tmp or under(cwd, tmp .. "/") then return encode("-tmp", cwd:sub(#tmp + 2)) end
+  if cwd == home or under(cwd, home .. "/") then return encode("-", cwd:sub(#home + 2)) end
+  return M.pi_slug(cwd)
+end
 
 local MONTHS = { Jan = 1, Feb = 2, Mar = 3, Apr = 4, May = 5, Jun = 6,
                  Jul = 7, Aug = 8, Sep = 9, Oct = 10, Nov = 11, Dec = 12 }
@@ -459,7 +482,8 @@ function M.claude_pid_session(pid, started, home, reader)
 end
 
 -- A session ID given on the command line: `codex resume <id>`,
--- `claude --resume <id>`, `claude --session-id <id>` or `pi --session <id>`.
+-- `claude --resume <id>`, `claude --session-id <id>`, `pi --session <id>`
+-- or `omp --resume <id>`.
 function M.argv_session(app, argv)
   argv = list(argv)
   for i = 1, #argv - 1 do
@@ -467,6 +491,7 @@ function M.argv_session(app, argv)
     local wanted = (app == "codex" and a == "resume")
       or (app == "claude" and (a == "--resume" or a == "-r" or a == "--session-id"))
       or (app == "pi" and (a == "--session" or a == "--session-id"))
+      or (app == "omp" and (a == "--resume" or a == "-r"))
     if wanted and b:match("^" .. UUID .. "$") then return b end
   end
   for _, a in ipairs(argv) do
@@ -499,7 +524,7 @@ local function chat_in(p, info)
   local name = p.name or argv[1]
   local id, store = M.fx_session(files)
   if id then return { kind = "chat", app = "fx", id = id, store = store, argv = argv } end
-  for _, app in ipairs({ "claude", "codex", "pi" }) do
+  for _, app in ipairs({ "claude", "codex", "pi", "omp" }) do
     if M.is_app(app, name, argv) then
       local found, file
       if app == "claude" then
@@ -551,8 +576,9 @@ local function newest_session_file(pane, info)
   local age = (info.ps[pane.pid] or {}).age or 0
   local since = info.now - age - 5
   local candidates = {}
-  if pane.app == "claude" or pane.app == "pi" then
-    local slug = pane.app == "claude" and M.claude_slug(pane.cwd) or M.pi_slug(pane.cwd)
+  if pane.app == "claude" or pane.app == "pi" or pane.app == "omp" then
+    local slug = pane.app == "claude" and M.claude_slug(pane.cwd)
+      or pane.app == "omp" and M.omp_slug(pane.cwd) or M.pi_slug(pane.cwd)
     candidates = list_dir(HOME .. SESSION_FILES[pane.app].dir .. slug, ".jsonl")
   else
     local minutes = tostring(math.floor(age / 60) + 2)
@@ -774,7 +800,7 @@ function M.summary(snap)
     end
   end
   local parts = {}
-  for _, app in ipairs({ "fx", "claude", "codex", "pi" }) do
+  for _, app in ipairs({ "fx", "claude", "codex", "pi", "omp" }) do
     if apps[app] then parts[#parts + 1] = apps[app] .. " " .. app end
   end
   local text = string.format("%d sessions, %d tabs, %d chats", sessions, tabs, chats)
@@ -918,7 +944,7 @@ function M.resume_argv(pane, accepts)
       argv[#argv + 1] = "--sessions-v2"
     end
     argv[#argv + 1] = "--resume"
-  elseif pane.app == "claude" then
+  elseif pane.app == "claude" or pane.app == "omp" then
     argv[#argv + 1] = "--resume"
   elseif pane.app == "pi" then
     argv[#argv + 1] = "--session"
@@ -927,12 +953,12 @@ function M.resume_argv(pane, accepts)
   return argv
 end
 
--- pi keeps no lock, so a pi whose session isn't known may be this very chat:
+-- pi and omp keep no lock, so a pi (or omp) whose session isn't known may be this very chat:
 -- then the chat is typed, not run, and two pi never write one session.
 local function command_for(pane, open)
   if pane.kind == "chat" then
     local command = M.join(M.resume_argv(pane))
-    if pane.app == "pi" and open.unknown_pi then return command end
+    if (pane.app == "pi" or pane.app == "omp") and open["unknown_" .. pane.app] then return command end
     return command .. "\n"
   end
   if pane.kind == "program" and #list(pane.argv) > 0 then return M.join(pane.argv) end
@@ -945,7 +971,7 @@ local function open_chats(saved, live)
     for _, w in ipairs(list(s.windows)) do
       for _, p in ipairs(M.panes(w.layout)) do
         if p.kind == "chat" then open[p.app .. ":" .. p.id] = true end
-        if p.unknown_app == "pi" then open.unknown_pi = true end
+        if p.unknown_app == "pi" or p.unknown_app == "omp" then open["unknown_" .. p.unknown_app] = true end
       end
     end
   end
@@ -960,7 +986,7 @@ local function open_chats(saved, live)
               (p.store == "v2" and ("v2/" .. p.id .. "/lock") or (p.id .. "/session.lock"))
           end
           -- Claude and pi hold no file open, so only the tabs show them.
-          if path and p.app ~= "claude" and p.app ~= "pi" then
+          if path and p.app ~= "claude" and p.app ~= "pi" and p.app ~= "omp" then
             paths[#paths + 1] = path
             owner[path] = p.app .. ":" .. p.id
           end

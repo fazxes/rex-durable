@@ -10,6 +10,7 @@ Rex saves your sessions, tabs, and splits when its server stops, and restores th
 | Claude Code chat | Reopens on its conversation: `claude --resume <id>` |
 | Codex chat | Reopens on its conversation: `codex resume <id>` |
 | pi chat | Reopens on its session: `pi --session <id>` |
+| omp (oh-my-pi) chat | Reopens on its session: `omp --resume <id>` |
 | Any other program | Typed at the prompt, not run. Press Enter if you want it. |
 | Plain shell | Left alone |
 
@@ -81,6 +82,7 @@ Or run **Repair Missing Tabs** from the command palette. Repair adds each missin
   - **Codex** keeps its rollout file open (`~/.codex/sessions/…/rollout-…-<id>.jsonl`), or the ID is on its command line (`codex resume <id>`).
   - **Claude Code** writes `~/.claude/sessions/<pid>.json` while it runs, with the session the chat is on now, also after `/clear` or `/resume`. rex-durable uses it when its pid and start time match the chat's process, so chats that share a folder each come back on their own conversation. Without that file, it uses the session on the command line (`--resume <id>`), or else the newest session file for that folder written since the chat started. If two such chats share a folder, it can't tell them apart, so they come back typed, not run.
   - **pi** names the session on its command line (`--session <id>`), or writes it to `~/.pi/agent/sessions/`. An idle pi writes nothing, so rex-durable remembers the command it typed on restore and binds it to the pi that starts in that tab. pi holds no lock, so while a pi whose session isn't known runs in Rex, a pi chat comes back typed, not run.
+  - **omp** (oh-my-pi) works like pi: it names the session on its command line (`--resume <id>`), or writes it to `~/.omp/agent/sessions/`. omp holds no lock either, so while an omp whose session isn't known runs in Rex, an omp chat comes back typed, not run. Very long folder paths get a hashed session folder that rex-durable can't predict; such a chat also comes back typed.
 
   Saves go to `~/Library/Application Support/rex-durable/` on macOS, or `~/.local/state/rex-durable/` on Linux. It keeps the last save of each of the latest 10 servers, a copy every 10 minutes for the last 24 hours in `history/`, and the 10 newest automatic checkpoints.
 - **Restoring.** When the watcher connects to a server instance it hasn't seen, it takes the last save from the previous server. Rex restores its own sessions with the same block IDs, so each program goes back into exactly the tab it came from, by block ID first and then by session name and position. If the server starts empty, for example after `rex server stop --discard`, rex-durable creates the saved sessions itself.
