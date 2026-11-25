@@ -122,6 +122,16 @@ check("pi slug, : as - like pi", M.pi_slug("/Users/me/a:b"), "--Users-me-a-b--")
 check("pi --session", M.argv_session("pi", { "pi", "--session", pi_id }), pi_id)
 check("pi --session-id", M.argv_session("pi", { "pi", "--session-id", pi_id }), pi_id)
 check("pi --session wants a UUID", M.argv_session("pi", { "pi", "--session", "latest" }), nil)
+local omp_id = "01a1ea4c-b3d1-750d-abf3-977f0f58083d"
+local omp_file = HOME .. "/.omp/agent/sessions/-projects-x/2026-11-17T16-17-37-745Z_" .. omp_id .. ".jsonl"
+check("omp file", (M.session_file("omp", { omp_file })), omp_id)
+check("omp file is not a pi file", (M.session_file("pi", { omp_file })), nil)
+check("omp slug under home", M.omp_slug("/home/me/projects/x", "/home/me", "/tmp"), "-projects-x")
+check("omp slug of home", M.omp_slug("/home/me", "/home/me", "/tmp"), "-")
+check("omp slug under tmp", M.omp_slug("/tmp/scratch/omp-fleet", "/home/me", "/tmp"), "-tmp-scratch-omp-fleet")
+check("omp slug elsewhere", M.omp_slug("/srv/a", "/home/me", "/tmp"), "--srv-a--")
+check("omp --resume", M.argv_session("omp", { "omp", "--resume", omp_id }), omp_id)
+check("omp --resume wants a UUID", M.argv_session("omp", { "omp", "--resume", "01a1ea4c" }), nil)
 
 -- ~/.claude/sessions/<pid>.json
 check("procStart is UTC", M.parse_utc("Sun Nov 22 21:40:38 2026"), 1795383638)
@@ -179,6 +189,9 @@ check("codex resume with model",
 check("pi keeps model, drops the rest",
   cmd({ app = "pi", id = pi_id, argv = { "pi", "--model", "m1", "--verbose", "--thinking", "high" } }),
   "pi --model m1 --thinking high --session " .. pi_id)
+check("omp keeps model, drops the rest",
+  cmd({ app = "omp", id = omp_id, argv = { "omp", "--model", "m1", "--yolo", "--thinking", "high" } }),
+  "omp --model m1 --thinking high --resume " .. omp_id)
 check("codex --yolo kept on resume",
   cmd({ app = "codex", id = uuid, argv = { "codex", "--yolo" } }),
   "codex resume --yolo " .. uuid)
